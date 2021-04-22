@@ -1,0 +1,533 @@
+---
+title: "Stackoverflow Survey 2019"
+subtitle: Erstellt von 4757202
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+# Einbindung der Datenbank
+```{r results='hide'}
+# Setzen der working directory
+setwd("C:/Users/buehring/Desktop/Workspace/02_DHBW/01_Semester/5. Semester/Datenanalyse mit R/Stackoverflow_Developer_Survey_2019/Developer_Survey_2019")
+
+# Bibliothek zum Verbinden der Datenbank
+library(DBI)
+
+# Verbindung zur Datenbank herstellen
+connection <- dbConnect(RSQLite::SQLite(), "survey.db")
+
+# Datenbank einlesen
+tableName <- "results"
+dbReadTable(connection, tableName)
+```
+# Beschreibung der Daten
+
+Bei dem Datensatz handelt es sich um die vollständigen, bereinigten Ergebnisse der Stack Overflow-Entwicklerumfrage 2019. Die Umfrage wurde vom 23. Januar bis 14. Februar 2019 durchgeführt. Die durchschnittliche Zeit, die für qualifizierte Beantwortungen für die Umfrage aufgewendet wurde, betrug 23,3 Minuten. Der Datensatz umfässt 85 Spalten und enthält über 88000 Zeilen.
+
+
+# Umfrageteilnehmer
+
+Zunächst wird in diesem Kapitel eine Übersicht über die Umfrageteilnehmer erstellt. 
+
+## Ein allgemeiner Überblick mittels Geovisualisierung
+
+Quelle Geovisualisierung: https://slcladal.github.io/maps.html#Introduction
+
+```{r}
+# SQL query ausführen
+countries <- dbGetQuery(connection, "SELECT country FROM results")
+
+# in Dataframe umwandeln
+countryFreq <- as.data.frame(table(countries))
+
+# Bibliothek zur Darstellung der Weltkarte
+library(rworldmap)
+
+# Daten aus Dataframe werden auf eine Karte übertragen
+visitedMap <- joinCountryData2Map(countryFreq, 
+                                  joinCode = "NAME",
+                                  nameJoinColumn = "countries")
+```
+
+173 der 179 Länder konnten korrekt zugewiesen werden. Die 6 fehlenden Länder
+vermutlich aufgrund ihrer Schreibweise im Datensatz nicht zugewiesen werden.
+
+```{r}
+# Wissenschaftliche Schreibweise von Zahlen deaktivieren (z.B. 1e +05)
+options(scipen=999)
+
+# Parameter der Karte bestimmen (z.B. Farben, Titel, ...)
+mapParams <- mapCountryData(visitedMap, 
+                            nameColumnToPlot="Freq",
+                            oceanCol = "azure2",
+                            numCats=10,
+                            catMethod=c(1,10,100,1000,10000,100000),
+                            missingCountryCol = gray(.8),
+                            colourPalette = c("coral",
+                                              "coral2",
+                                              "coral3", "orangered", 
+                                              "orangered3", "orangered4"),
+                            addLegend = FALSE,
+                            mapTitle = "Anzahl der Umfrageteilnehmer - Verteilung nach Region",
+                            border = NA)
+
+# Legende hinzufügen und Karte anzeigen
+do.call(addMapLegend, c(mapParams, legendLabels="all",
+                       legendWidth=0.5,
+                       legendIntervals="page",
+                       legendMar=4))
+```
+### Nordamerika
+
+Die USA kann die höchste Anzahl an Umfrageteilnehmern aufweisen. 
+```{r}
+countryFreq[which(countryFreq$Freq == max(countryFreq$Freq)), ]
+```
+Dies ist vermutlich darauf zurückzuführen, dass Stackoverflow
+eine englischsprachige Plattform ist und die USA eine große Population und
+die meisten Englischsprecher auf der Welt besitzt.
+
+Auch Kanada kann eine hohe Teilnehmeranzahl zwischen 1000 und 10000 Teilnehmern
+aufweisen.
+
+### Europa
+
+Zunächst schauen wir uns Europa genauer an, da es auf der Karte ziemlich klein
+ist.
+
+```{r}
+# Parameter der Karte bestimmen (z.B. Farben, Titel, ...)
+mapParams <- mapCountryData(visitedMap, 
+                            nameColumnToPlot="Freq",
+                            oceanCol = "azure2",
+                            numCats=10,
+                            catMethod=c(1,10,100,1000,10000,100000),
+                            missingCountryCol = gray(.8),
+                            colourPalette = c("coral",
+                                              "coral2",
+                                              "coral3", "orangered", 
+                                              "orangered3", "orangered4"),
+                            addLegend = FALSE,
+                            mapRegion = "Europe",
+                            mapTitle = "Anzahl der Umfrageteilnehmer - Europa",
+                            border = NA)
+
+# Legende hinzufügen und Karte anzeigen
+do.call(addMapLegend, c(mapParams, legendLabels="all",
+                       legendWidth=0.5,
+                       legendIntervals="page",
+                       legendMar=4))
+```
+In Zentral- und Westeuropa haben in der Regel zwischen 1000 und 10000 Personen
+pro Land an der Umfrage teilgenommen, in Osteuropa sinkt diese Zahl in den meisten
+Fällen auf 100 bis 1000 Antworten. Die Abnahme in Osteuropa ist vermutlich einerseits
+auf die geringeren Bevölkerungszahlen, andererseits aber auch auf die
+wirtschaftliche Situation und den durchschnittlichen Bildungsgrad der Länder
+zurückzuführen.
+
+### Afrika
+
+Besonders im afrikanischen Raum ist die Anzahl der Umfrageteilnehmer pro Land gering.
+Während in seltenen Fällen die Anzahl der Teilnehmer zwischen 100 und 1000 liegt,
+ist diese in der Regel zwischen 1 und 10 oder zwischen 10 und 100 Teilnehmern. 
+In seltenen Fällen gibt es keine Teilnehmer aus Ländern in Afrika.
+
+## Länder mit der größten Teilnehmeranzahl
+
+Die 5 Länder mit den meisten Teilnehmern sind die USA, Indien, Deutschland, UK
+und Kanada.
+
+```{r}
+df_sorted <- countryFreq[order(-countryFreq$Freq), ]
+head(df_sorted, 5)
+```
+## Geschlechterverteilung
+
+```{r, fig.height=7, fig.width=10}
+library(dplyr)
+
+# SQL Befehl ausführen
+gender <- dbGetQuery(connection, "SELECT Gender FROM results")
+
+# Unterkategorien der Geschlechtsmindeheiten unter "Non-Binary" zusammenfassen
+gender <- mutate(gender, Gender=ifelse(grepl("Non-binary", Gender, ignore.case = T), "Non-binary", ifelse(grepl("Woman;Man", Gender, ignore.case = T), "Non-binary", Gender)))
+
+gender_df <- as.data.frame(table(gender))
+
+pct <- round(gender_df$Freq/sum(gender_df$Freq)*100, 2)
+
+labels <- paste(gender_df$gender, pct)
+
+labels <- paste(labels, "%", sep="")
+
+colors <- c("light blue", "coral", "light green")
+
+pie(gender_df$Freq, labels=labels, main="Geschlechterverteilung bei der Umfrage",
+    col=colors)
+```
+Etwa 91% der Umfrageteilnehmer sind Männer, 7% sind Frauen und etwa 1% identifiziert sich mit keinem der traditionellen Geschlechter. Die große Mehrheit von Männern ist zurückzuführen auf die starke
+Männerdominanz in der IT-Branche.
+
+## Verteilung nach Kontinent
+
+Zunächst wird den Ländern mit der Bibliothek "countrycode" ihr passender
+Kontinent zugewiesen.
+
+```{r}
+# SQL Befehl ausführen
+country_ethnicity_gender <- dbGetQuery(connection, "SELECT Country, Ethnicity, Gender FROM results")
+
+# Unterkategorien der Geschlechtsmindeheiten unter "Non-Binary" zusammenfassen
+country_ethnicity_gender <- mutate(country_ethnicity_gender, Gender=ifelse(grepl("Non-binary", Gender, ignore.case = T), "Non-binary", ifelse(grepl("Woman;Man", Gender, ignore.case = T), "Non-binary", Gender)))
+
+# Bibliothek zum Zuteilen der Kontinente
+library(countrycode)
+
+# Erstellen einer Kontinentspalte, welche befüllt wird
+country_ethnicity_gender$Continent <- countrycode(sourcevar = country_ethnicity_gender[, "Country"],
+                            origin = "country.name",
+                            destination = "continent")
+
+# Ausgabe
+head(country_ethnicity_gender, 5)
+```
+
+
+Anschließend kann ein Barplot erstellt werden, um sich eine Übersicht zu
+verschaffen.
+
+```{r}
+country_ethnicity_gender_clean <- country_ethnicity_gender[complete.cases(country_ethnicity_gender), ]
+
+library(ggplot2)
+
+# Barplot der Kontinente
+ggplot(country_ethnicity_gender_clean, aes(x=Continent)) + 
+  geom_bar(stat='count', width = 0.6) + 
+  xlab("Continent") +
+  ylab("Frequency") +
+  scale_y_continuous(limits = c(0, 35000), breaks = seq (0, 30000, 5000)) +
+  ggtitle("Umfrageteilnehmer nach Kontinent") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip() +
+  geom_text(aes(label=stat(paste(format(round(count/lengths(country_ethnicity_gender_clean)*100, 1)), "%"))), 
+            stat="count", 
+            hjust=-0.1) # Werte in Prozent anzeigen lassen
+```
+Europa liefert mit fast 43% gesamtheitlich die größte Anzahl an Teilnehmern. Auf dem zweiten
+Rang steht Amerika (Achtung: Nord- und Südamerika wurden zusammengefasst) mit 34.9%, darauf
+folgt Asien mit 16,6%. 
+
+Ozeanien und Afrika lieferten mit 2,8% und 3,0% die geringste Anzahl an Teilnehmern.
+
+
+## Geschlechterverteilung nach Kontinent
+
+```{r}
+ggplot(country_ethnicity_gender_clean, aes(x=Continent, fill=Gender)) + 
+  geom_bar(stat='count', width = 0.6, position = 'fill') + 
+  xlab("Continent") +
+  ylab("Percentage") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = c(0.9, 0.75)) +
+  coord_flip() +
+  ggtitle("Geschlechterverteilung pro Kontinent") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Betrachtet man die Geschlechterverteilung nach Kontinent, so erkennt man, dass Amerika
+den höchsten Anteil an Frauen aufweist. Die restlichen vier Kontinente haben eine
+ähnliche Geschlechterverteilung. Die Teilnehmer mit nichtbinären Geschlechtern sind prozentual etwas häufiger in Ozeanien und Amerika zu finden, jedoch ist die Verteilung auf den Kontinenten etwa gleich.
+
+# Jobzufriedenheit
+```{r}
+# SQL Befehl ausführen
+job_sat <- dbGetQuery(connection, "SELECT JobSat From results")
+
+# Null-Werte entfernen
+job_sat_clean <- na.omit(job_sat)
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+job_sat_clean %>%
+  mutate(job_sat_order = fct_relevel(JobSat, 
+            "Very dissatisfied", "Slightly dissatisfied", 
+            "Neither satisfied nor dissatisfied", 
+            "Slightly satisfied", "Very satisfied")) %>%
+  ggplot(aes(x=job_sat_order)) + 
+  geom_bar(width = 0.6) + 
+  scale_y_continuous(limits = c(0, 27000), breaks = seq (0, 30000, 5000)) +
+  xlab("Job satisfaction") +
+  ylab("Frequency") +
+  coord_flip() +
+  ggtitle("Jobzufriedenheit bei den Umfrageteilnehmern") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label=stat(paste(format(round(count/lengths(job_sat_clean)*100, 1)), "%"))), 
+            stat="count", 
+            hjust=-0.1) # Werte in Prozent anzeigen lassen
+
+```
+
+Fast zwei Drittel der Befragten sind entweder zufrieden oder sehr zufrieden mit ihrem Job.
+Etwas mehr als 12% sind weder zufrieden noch unzufrieden und etwa 22% der Befragten sind
+entweder unzufrieden oder sehr unzufrieden.
+
+```{r, fig.width=12, fig.height=6}
+# Bibliotheken importieren
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+# SQL Befehl ausführen
+job_sat_ed <- dbGetQuery(connection, "SELECT JobSat, Edlevel From results")
+
+# Nur komplette Zeilen übernehmen (also alle NA-Werte entfernen)
+job_sat_ed_clean <- job_sat_ed[complete.cases(job_sat_ed), ]
+ 
+job_sat_ed_clean %>%
+  mutate(job_sat_ed_order = fct_relevel(JobSat, 
+            "Very dissatisfied", "Slightly dissatisfied", 
+            "Neither satisfied nor dissatisfied", 
+            "Slightly satisfied", "Very satisfied")) %>%
+  ggplot(aes(fill = EdLevel, x=job_sat_ed_order)) +
+  geom_bar(position="fill") +
+  ggtitle("Jobzufriedenheit in Abhängigkeit vom Bildungsgrad") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Job satisfaction") +
+  ylab("Percentage") +
+  coord_flip() +
+  theme(legend.title = element_text(color = "black", size = 7),
+        legend.text = element_text(color = "black", size = 8))
+```
+
+In Abhängigkeit vom Bildungsgrad lassen sich bei der Jobzufriedenheit keine großen Unterschiede erkennen. 
+
+# Karriere-Zufriedenheit
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+car_sat <- dbGetQuery(connection, "SELECT CareerSat FROM results")
+
+car_sat_clean <- na.omit(car_sat)
+
+car_sat_clean %>%
+  mutate(car_sat_order = fct_relevel(CareerSat, 
+            "Very dissatisfied", "Slightly dissatisfied", 
+            "Neither satisfied nor dissatisfied", 
+            "Slightly satisfied", "Very satisfied")) %>%
+  ggplot(aes(x=car_sat_order)) + 
+  geom_bar(width = 0.6) + 
+  scale_y_continuous(limits = c(0, 32000), breaks = seq (0, 30000, 5000)) +
+  xlab("Career satisfaction") +
+  ylab("Frequency") +
+  coord_flip() +
+  ggtitle("Karrierezufriedenheit bei den Umfrageteilnehmern") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label=stat(paste(format(round(count/lengths(car_sat_clean)*100, 1)), "%"))), 
+            stat="count", 
+            hjust=-0.1) # Werte in Prozent anzeigen lassen
+```
+
+40% der Umfrageteilnehmer sind mit ihrer Karriere sehr zufrieden und etwa 34% geben an, zufrieden zu sein. Somit sind fast 3/4 der Umfrageteilnehmer zufrieden mit ihrer Karriere. 
+
+10% geben an, weder zufrieden noch unzufrieden zu sein. 10,5% der Umfrageteilnehmer sind nicht mit ihrer Karriere zufrieden, nur etwa 5% sind sehr unzufrieden.
+
+```{r, fig.width=12, fig.height=6}
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+career_sat_ed <- dbGetQuery(connection, "SELECT CareerSat, Edlevel From results")
+
+career_sat_ed_clean <- career_sat_ed[complete.cases(career_sat_ed), ]
+
+career_sat_ed_clean %>%
+  mutate(career_sat_ed_order = fct_relevel(CareerSat, 
+            "Very dissatisfied", "Slightly dissatisfied", 
+            "Neither satisfied nor dissatisfied", 
+            "Slightly satisfied", "Very satisfied")) %>%
+  ggplot(aes(fill = EdLevel, x=career_sat_ed_order)) +
+  geom_bar(position="fill") +
+  ggtitle("Karrierezufriedenheit in Abhängigkeit vom Bildungsgrad") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Career satisfaction") +
+  ylab("Frequency") +
+  coord_flip() +
+  theme(legend.title = element_text(color = "black", size = 7),
+        legend.text = element_text(color = "black", size = 8))
+```
+In Abhängigkeit vom Bildungsgrad lassen sich auch bei der Karrierezufriedenheit keine großen Unterschiede erkennen. Auffällig ist, dass der prozentuale Anteil der Menschen ohne "formal education" bei den sehr unzufriedenen am größten ist.
+
+# Lohnniveau Länderverteilung
+
+```{r}
+# SQL Befehl ausführen
+salary <- dbGetQuery(connection, "SELECT ConvertedComp, Country FROM results")
+
+# Identifizieren und Entfernen von Ausreißern
+outliers <- boxplot(salary$ConvertedComp, plot=FALSE)$out
+salary_clean <- salary[-which(salary$ConvertedComp %in% outliers), ]
+
+# In Dataframe umwandeln
+salary_df <- as.data.frame(salary_clean)
+
+# Durchschnitt berechnen
+average_salary <- aggregate(ConvertedComp ~ Country, salary_df, mean)
+
+# Absteigend sortieren
+average_salary_sorted <- average_salary[order(-average_salary$ConvertedComp), ]
+
+average_salary_sorted
+```
+
+```{r}
+# Wissenschaftliche Schreibweise von Zahlen deaktivieren (z.B. 1e +05)
+options(scipen=999)
+
+salaryMap <- joinCountryData2Map(average_salary, 
+                                  joinCode = "NAME",
+                                  nameJoinColumn = "Country")
+
+# Parameter der Karte bestimmen (z.B. Farben, Titel, ...)
+mapParams <- mapCountryData(salaryMap, 
+                            nameColumnToPlot="ConvertedComp",
+                            oceanCol = "azure2",
+                            numCats=10,
+                            catMethod=c(0,5000,10000,25000,50000,100000,170000),
+                            missingCountryCol = gray(.8),
+                            colourPalette = c("coral",
+                                              "coral2",
+                                              "orangered", 
+                                              "orangered3",
+                                              "orangered4"),
+                            addLegend = FALSE,
+                            mapTitle = "Durchschnittliches Jahresgehalt pro Land",
+                            border = NA)
+
+# Legende hinzufügen und Karte anzeigen
+do.call(addMapLegend, c(mapParams, legendLabels="all",
+                       legendWidth=0.5,
+                       legendIntervals="page",
+                       legendMar=4))
+```
+Die durchschnittlichen Jahresgehälter entsprechen ungefähr der Verteilung der Bruttoinlandsprodukte der Länder (siehe https://ourworldindata.org/grapher/gdp-per-capita-worldbank). Eine starke Ausnahme stellt hier die Demokratische Republik Kongo dar. Auch nach dem Entfernen von Ausreißern steht das Land an zweiter Stelle was den Jahresverdienst angeht. 
+
+# Lohn in Abhängigkeit von Berufserfahrung
+
+```{r}
+# SQL Befehl durchführen
+salaryByExperience <- dbGetQuery(connection, "SELECT ConvertedComp, YearsCodePro FROM results")
+
+# Identifizieren und Entfernen von Ausreißern
+outliers <- boxplot(salaryByExperience$ConvertedComp, plot=FALSE)$out
+salaryByExperience <- salaryByExperience[-which(salaryByExperience$ConvertedComp %in% outliers), ]
+
+# "Less than 1 year" zu 0 ändern (befinden sich im 0ten Jahr)
+salaryByExperience <- mutate(salaryByExperience, YearsCodePro=ifelse(grepl("Less than 1 year", YearsCodePro, ignore.case = T), 0, YearsCodePro))
+
+# In Integer umwandeln
+salaryByExperience$YearsCodePro <- as.integer(salaryByExperience$YearsCodePro)
+
+# Nur komplette Datensätze behalten (NA entfernen)
+salaryByExperience_clean <- salaryByExperience[complete.cases(salaryByExperience), ]
+```
+
+```{r}
+library(ggplot2)
+ggplot(salaryByExperience_clean, aes(x=YearsCodePro)) + 
+  geom_bar(stat = 'count') +
+  ylab("Anzahl") +
+  ggtitle("Verteilung - Berufserfahrung in Jahren") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+Die meisten Teilnehmer besitzen unter 10 Jahre professioneller Berufserfahrung im Programmieren.
+
+
+```{r}
+library(ggplot2)
+ggplot(salaryByExperience_clean, aes(x=YearsCodePro, y=ConvertedComp)) + 
+  geom_bar(stat = 'summary', fun='mean') +
+  geom_smooth(method = "lm") +
+  xlab("Berufserfahrung in Jahren") +
+  ylab("Jahreseinkommen in Dollar") +
+  ggtitle("Lohn in Abhängigkeit der Berufserfahrung") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+Es lässt sich bis zu etwa 25 Jahren Berufserfahrung ein klarer Trend von steigendem Lohn
+erkennen, danach flacht die Steigung etwas ab. Ab etwa 30 Jahren Berufserfahrung sind die Werte unzuverlässiger, da es in diesen Bereichen nur wenige Umfrageteilnehmer und somit wenige Werte gibt.
+
+# Gender-Pay-Gap
+
+```{r}
+# SQL Befehl ausführen
+salaryByGender <- dbGetQuery(connection, "SELECT Country, ConvertedComp, Gender, YearsCodePro FROM results")
+
+# Unterkategorien der Geschlechtsmindeheiten unter "Non-Binary" zusammenfassen
+salaryByGender <- mutate(salaryByGender, Gender=ifelse(grepl("Non-binary", Gender, ignore.case = T), "Non-binary", ifelse(grepl("Woman;Man", Gender, ignore.case = T), "Non-binary", Gender)))
+
+# Nur komplette Datensätze behalten (NA entfernen)
+salaryByGender <- salaryByGender[complete.cases(salaryByGender), ]
+
+# Identifizieren und Entfernen von Ausreißern
+outliers <- boxplot(salaryByGender$ConvertedComp, plot=FALSE)$out
+salaryByGender_clean <- salaryByGender[-which(salaryByGender$ConvertedComp %in% outliers), ]
+
+library(ggplot2)
+ggplot(salaryByGender_clean, aes(x=ConvertedComp, color=Gender)) +
+  geom_density()
+```
+Die Verteilung der Gehälter scheint ziemlich gleich zu sein. Lediglich im niedrig bezahlten Bereich schneiden die Männer etwas besser ab. Die nichtbinären Teilnehmer haben im höher bezahlten Bereich eine höhere Dichte als Männer und Frauen.
+
+```{r}
+sorted_salary_by_gender <- salaryByGender_clean %>%
+  group_by(Gender) %>%
+  summarise(AverageSalary=mean(ConvertedComp))
+
+sorted_salary_by_gender
+```
+Das Durchschnittsgehalt ist in dieser Umfrage bei Männern und Frauen fast gleich und unterscheidet sich in etwa nur um 300 Dollar im Jahr zu Gunsten der Frauen. Teilnehmer, welche sich keine Geschlecht zuordnen, verdienen in dieser Umfrage im Durchschnitt sogar mehr. 
+
+Die Gender Pay Gap spiegelt sich gesamtheitlich in dieser Umfrage nicht wider.
+
+## Verteilung pro Land
+
+```{r}
+library(dplyr)
+
+sortedSalaryByGenderCountry <- salaryByGender_clean %>%
+  group_by(Country, Gender) %>%
+  summarise(AverageSalary=(mean(ConvertedComp)))
+
+sortedSalaryByGenderCountry
+```
+
+## Gender Pay Gap in Abhängigkeit zur Berufserfahrung
+
+```{r}
+# "Less than 1 year" zu 0 ändern (befinden sich im 0ten Jahr)
+salaryByGender_clean <- mutate(salaryByGender_clean, YearsCodePro=ifelse(grepl("Less than 1 year", YearsCodePro, ignore.case = T), 0, YearsCodePro))
+
+# In Integer umwandeln
+salaryByGender_clean$YearsCodePro <- as.integer(salaryByGender_clean$YearsCodePro)
+
+library(ggplot2)
+ggplot(salaryByGender_clean, aes(x=YearsCodePro, y=ConvertedComp, color=Gender, group=Gender, fill=Gender)) + 
+  geom_point(stat = 'summary', fun='mean') +
+  geom_smooth(aes(fill=Gender), method = "lm") +
+  xlab("Berufserfahrung in Jahren") +
+  ylab("Jahreseinkommen in Dollar") +
+  ggtitle("Lohn in Abhängigkeit der Berufserfahrung") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Beim Gehalt der Männer besitzen die Daten keine große Streuung. Bei Frauen und nicht-binären existieren weniger Daten, was vermutlich für eine größere Streuung der Daten sorgt. In diesem Beispiel ist zu erkennen, dass die Umfrageteilnehmerinnen durchschnittlich ein größeres Gehalt beim Berufseinstieg bekommen haben, allerdings stieg das Gehalt der Männer mit steigender Berufserfahrung mehr an. Mögliche Ursachen könnten beispielsweise die Gründung einer Familie sein, bei der Frauen i.d.R. eine längere Berufspause als Männer einlegen und in dieser Zeit weniger Gehaltserhöhungen bekommen.
